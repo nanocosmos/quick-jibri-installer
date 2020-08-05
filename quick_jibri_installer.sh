@@ -22,11 +22,13 @@ fi
 # SYSTEM SETUP
 JITSI_REPO=$(apt-cache policy | grep http | grep jitsi | grep stable | awk '{print $3}' | head -n 1 | cut -d "/" -f1)
 CERTBOT_REPO=$(apt-cache policy | grep http | grep certbot | head -n 1 | awk '{print $2}' | cut -d "/" -f4)
+CERTBOT_REL_FILE="http://ppa.launchpad.net/certbcertbot/ubuntu/dists/$(lsb_release -sc)/Release"
 APACHE_2=$(dpkg-query -W -f='${Status}' apache2 2>/dev/null | grep -c "ok installed")
 NGINX=$(dpkg-query -W -f='${Status}' nginx 2>/dev/null | grep -c "ok installed")
 DIST=$(lsb_release -sc)
 GOOGL_REPO="/etc/apt/sources.list.d/dl_google_com_linux_chrome_deb.list"
 PROSODY_REPO=$(apt-cache policy | grep http | grep prosody| awk '{print $3}' | head -n 1 | cut -d "/" -f2)
+HWE_VIR_MOD=$(apt-cache madison linux-modules-extra-virtual-hwe-$(lsb_release -sr) 2>/dev/null|head -n1|grep -c "extra-virtual-hwe")
 
 if [ $DIST = flidas ]; then
 DIST="xenial"
@@ -79,29 +81,19 @@ else
 read -n 1 -s -r -p "Press any key to continue..."$'\n'
 fi
 }
-update_certbot() {
-	if [ "$CERTBOT_REPO" = "certbot" ]; then
-	echo "
-Cerbot repository already on the system!
-Checking for updates...
-"
-	apt-get -q2 update
-	apt-get -yq2 dist-upgrade
-else
-	echo "
-Adding cerbot (formerly letsencrypt) PPA repository for latest updates
-"
-	echo "deb http://ppa.launchpad.net/certbot/certbot/ubuntu $DIST main" > /etc/apt/sources.list.d/certbot.list
-	apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 75BCA694
-	apt-get -q2 update
-	apt-get -yq2 dist-upgrade
-fi
-}
 # sed limiters for add-jibri-node.sh variables
 var_dlim() {
     grep -n $1 add-jibri-node.sh|head -n1|cut -d ":" -f1
 }
-
+add_prosody_repo() {
+echo "Add Prosody repo"
+if [ "$PROSODY_REPO" = "main" ]; then
+	echo "Prosody repository already installed"
+else
+	echo "deb http://packages.prosody.im/debian $(lsb_release -sc) main" > /etc/apt/sources.list.d/prosody.list
+	wget -qO - https://prosody.im/files/prosody-debian-packages.key | apt-key add -
+fi
+}
 clear
 echo '
 ########################################################################
@@ -127,12 +119,14 @@ if ! [ $(id -u) = 0 ]; then
    echo "You need to be root or have sudo privileges!"
    exit 0
 fi
-if [ "$DIST" = "xenial" ] || [ "$DIST" = "bionic" ]; then
-	echo "OS: $(lsb_release -sd)
-Good, this is a supported platform!"
+if [ "$DIST" = "xenial" ] || \
+   [ "$DIST" = "bionic" ] || \
+   [ "$DIST" = "focal" ]; then
+	echo "OS: $(lsb_release -sd)"
+	echo "Good, this is a supported platform!"
 else
-	echo "OS: $(lsb_release -sd)
-Sorry, this platform is not supported... exiting"
+	echo "OS: $(lsb_release -sd)"
+	echo "Sorry, this platform is not supported... exiting"
 	exit
 fi
 #Suggest 18.04 LTS release over 16.04
@@ -141,6 +135,49 @@ echo "$(lsb_release -sc), even when it's compatible and functional.
 We suggest to use the next (LTS) release, for longer support and security reasons."
 read -n 1 -s -r -p "Press any key to continue..."$'\n'
 fi
+#Check resources
+echo "Verifying System Resources:"
+if [ "$(nproc --all)" -lt 4 ];then
+  echo "
+Warning!: The system do not meet the minimum CPU requirements for Jibri to run.
+>> We recommend 4 cores/threads for Jibri!
+"
+  CPU_MIN="N"
+else
+  echo "CPU Cores/Threads: OK ($(nproc --all))"
+  CPU_MIN="Y"
+fi
+### Test RAM size (8GB min) ###
+mem_available=$(grep MemTotal /proc/meminfo| grep -o '[0-9]\+')
+if [ ${mem_available} -lt 7700000 ]; then
+  echo "
+Warning!: The system do not meet the minimum RAM requirements for Jibri to run.
+>> We recommend 8GB RAM for Jibri!
+"
+  MEM_MIN="N"
+else
+  echo "Memory: OK ($((mem_available/1024)) MiB)"
+  MEM_MIN="Y"
+fi
+if [ "$CPU_MIN" = "Y" ] && [ "$MEM_MIN" = "Y" ];then
+    echo "All requirements seems meet!"
+    echo "We hope you have a nice recording/streaming session"
+else
+    echo "CPU ($(nproc --all))/RAM ($((mem_available/1024)) MiB) does NOT meet minimum recommended requirements!"
+    echo "Even when you can use the videconference sessions, we advice to increase the resoruces in order to user Jibri."
+    while [[ "$CONTINUE_LOW_RES" != "yes" && "$CONTINUE_LOW_RES" != "no" ]]
+    do
+    read -p "> Do you want to continue?: (yes or no)"$'\n' -r CONTINUE_LOW_RES
+    if [ "$CONTINUE_LOW_RES" = "no" ]; then
+            echo "See you next time with more resources!..."
+            exit
+    elif [ "$CONTINUE_LOW_RES" = "yes" ]; then
+            echo "Please keep in mind that trying to use Jibri with low resources might fail."
+    fi
+    done
+fi
+#Prosody repository
+#add_prosody_repo
 # Jitsi-Meet Repo
 echo "Add Jitsi key"
 if [ "$JITSI_REPO" = "stable" ]; then
@@ -154,7 +191,7 @@ while [[ $LE_SSL != yes && $LE_SSL != no ]]
 do
 read -p "> Do you plan to use Let's Encrypt SSL certs?: (yes or no)"$'\n' -r LE_SSL
 if [ $LE_SSL = yes ]; then
-	echo "We'll defaul to Let's Encrypt SSL cers."
+	echo "We'll defaul to Let's Encrypt SSL certs."
 elif [ $LE_SSL = no ]; then
 	echo "We'll let you choose later on for it."
 fi
@@ -172,9 +209,18 @@ apt-get -y install \
 				git \
 				htop \
 				letsencrypt \
-				linux-image-generic-hwe-$(lsb_release -r|awk '{print$2}') \
 				unzip \
 				wget
+
+echo "# Check and Install HWE kernel if possible..."
+if [ "$HWE_VIR_MOD" == "1" ]; then
+    apt-get -y install \
+    linux-image-generic-hwe-$(lsb_release -sr) \
+    linux-modules-extra-virtual-hwe-$(lsb_release -sr)
+    else
+    apt-get -y install \
+    linux-modules-extra-$(uname -r)
+fi
 
 check_serv
 
@@ -279,6 +325,11 @@ LE_RENEW_LOG="/var/log/letsencrypt/renew.log"
 MOD_LISTU="https://prosody.im/files/mod_listusers.lua"
 MOD_LIST_FILE="/usr/lib/prosody/modules/mod_listusers.lua"
 ENABLE_SA="yes"
+#Sysadmin email
+while [[ -z $SYSADMIN_EMAIL ]]
+do
+read -p "Set sysadmin email (this is a mandatory field):"$'\n' -r SYSADMIN_EMAIL
+done
 #Language
 echo "## Setting up Jitsi Meet language ##
 You can define the language, for a complete list of the supported languages
@@ -289,10 +340,6 @@ https://github.com/jitsi/jitsi-meet/blob/master/lang/languages.json
 Jitsi Meet web interface will be set to use such language.
 "
 read -p "Please set your language (Press enter to default to 'en'):"$'\n' -r LANG
-while [[ -z $SYSADMIN_EMAIL ]]
-do
-read -p "Set sysadmin email (this is a mandatory field):"$'\n' -r SYSADMIN_EMAIL
-done
 #Drop unsecure TLS
 while [[ "$DROP_TLS1" != "yes" && "$DROP_TLS1" != "no" ]]
 do
@@ -410,6 +457,17 @@ elif [ "$ENABLE_TRANSCRIPT" = "yes" ]; then
 	echo "Jigasi Transcription will be enabled."
 fi
 done
+#Grafana
+while [[ "$ENABLE_GRAFANA_DSH" != "yes" && "$ENABLE_GRAFANA_DSH" != "no" ]]
+do
+read -p "> Do you want to setup Grafana Dashboard: (yes or no)
+( Please check requirements at: https://github.com/switnet-ltd/quick-jibri-installer )"$'\n' -r ENABLE_GRAFANA_DSH
+if [ "$ENABLE_GRAFANA_DSH" = "no" ]; then
+	echo "Grafana Dashboard won't be enabled."
+elif [ "$ENABLE_GRAFANA_DSH" = "yes" ]; then
+	echo "Grafana Dashboard will be enabled."
+fi
+done
 #Start configuration
 echo '
 ########################################################################
@@ -441,7 +499,30 @@ echo '
 #Disabled 'til fixed upstream
 #bash /usr/share/jitsi-meet/scripts/install-letsencrypt-cert.sh
 
-update_certbot
+echo "#Set and upgrade certbot PPA if posssible..."
+if [ "$CERTBOT_REPO" = "certbot" ]; then
+	echo "
+Cerbot repository already on the system!
+Checking for updates...
+"
+	apt-get -q2 update
+	apt-get -yq2 dist-upgrade
+else
+	if [ "$(curl -s -o /dev/null -w "%{http_code}" $CERTBOT_REL_FILE )" == "200" ]; then
+		echo "
+Adding cerbot (formerly letsencrypt) PPA repository for latest updates
+"
+		echo "deb http://ppa.launchpad.net/certbot/certbot/ubuntu $DIST main" > /etc/apt/sources.list.d/certbot.list
+		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 75BCA694
+		apt-get -q2 update
+		apt-get -yq2 dist-upgrade
+	fi
+	if [ "$(curl -s -o /dev/null -w "%{http_code}" $CERTBOT_REL_FILE )" == "404" ]; then
+		echo "
+Certbot PPA is not available for $(lsb_release -sc) just yet, it won't be installed...
+"
+	fi
+fi
 
 else
 echo "SSL setup will be skipped."
@@ -765,6 +846,11 @@ if [ "$ENABLE_TRANSCRIPT" = "yes" ]; then
 	bash $PWD/jigasi.sh
 fi
 {
+#Grafana Dashboard
+if [ "$ENABLE_GRAFANA_DSH" = "yes" ]; then
+	echo "Grafana Dashboard will be enabled."
+	bash $PWD/grafana.sh
+fi
 #Prevent Jibri conecction issue
 sed -i "/127.0.0.1/a \\
 127.0.0.1       $DOMAIN" /etc/hosts

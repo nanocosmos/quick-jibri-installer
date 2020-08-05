@@ -1,6 +1,15 @@
 # Quick Jibri Installer
 Bash installer for Jibri on **\*buntu LTS** based systems using **nginx** as default webserver.
 
+## Usage
+
+```
+git clone https://github.com/switnet-ltd/quick-jibri-installer
+cd quick-jibri-installer
+bash quick-jibri-installer.sh
+```
+Please check more details on our wiki.
+
 ## Requirements
 * Clean VM/VPS/Server using Ubuntu LTS
 * Valid domain with DNS record, **mandatory** for SSL certs via Let's Encrypt.
@@ -8,21 +17,23 @@ Bash installer for Jibri on **\*buntu LTS** based systems using **nginx** as def
 * Minimum recommended for video recording: 8 GB RAM / 2 Cores.
 * Webcam
 
+### Jigasi Transcript
+* SIP account
+* Google Cloud Account with Billing setup.
+### Jibri Recodings Access via Nextcloud
+* Valid domain with DNS record for Nextcloud SSL.
+
+
 ## Features
 * Enabled Session (video) Recording using Jibri
 * Enabled Jitsi Electron app detection server side.
 * Standalone SSL Certbot/LE implementation
 * Jigasi Transcript - Speech to Text powered by Google API
-* (New) JRA (Jibri Recordings Access) via Nextcloud
-* (New) Customized brandless mode
-* (New) Improved recurring updater
+* JRA (Jibri Recordings Access) via Nextcloud
+* Customized brandless mode
+* Improved recurring updater
+* (New) Grafana Dashboard
 
-### Jigasi Transcript
-* SIP account
-* Google Cloud Account with Billing setup.
-
-### Jibri Recodings Access via Nextcloud
-* Valid domain with DNS record for Nextcloud SSL.
 
 ## Optional custom changes
 * Optional default language
